@@ -1,5 +1,11 @@
 package com.azprc.itemreserver;
 
+import com.azprc.itemreserver.pojo.Order;
+import com.azure.storage.blob.BlobClient;
+import com.azure.storage.blob.BlobContainerClient;
+import com.azure.storage.blob.BlobServiceClient;
+import com.azure.storage.blob.BlobServiceClientBuilder;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.azure.functions.ExecutionContext;
 import com.microsoft.azure.functions.HttpMethod;
 import com.microsoft.azure.functions.HttpRequestMessage;
@@ -9,35 +15,71 @@ import com.microsoft.azure.functions.annotation.AuthorizationLevel;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.HttpTrigger;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.util.Optional;
 
-/**
- * Azure Functions with HTTP Trigger.
- */
 public class Function {
-    /**
-     * This function listens at endpoint "/api/HttpExample". Two ways to invoke it using "curl" command in bash:
-     * 1. curl -d "HTTP Body" {your host}/api/HttpExample
-     * 2. curl "{your host}/api/HttpExample?name=HTTP%20Query"
-     */
-    @FunctionName("HttpExample")
+    // Connection string for Blob Storage
+    // Get the connection string and container name from environment variables
+    private static final String STORAGE_CONNECTION_STRING = System.getenv("AZURE_STORAGE_CONNECTION_STRING");
+    private static final String CONTAINER_NAME = System.getenv("AZURE_STORAGE_CONTAINER_NAME");
+
+    @FunctionName("processOrder")
     public HttpResponseMessage run(
             @HttpTrigger(
-                name = "req",
-                methods = {HttpMethod.GET, HttpMethod.POST},
-                authLevel = AuthorizationLevel.ANONYMOUS)
-                HttpRequestMessage<Optional<String>> request,
+                    name = "req",
+                    methods = {HttpMethod.GET, HttpMethod.POST},
+                    authLevel = AuthorizationLevel.ANONYMOUS)
+            HttpRequestMessage<Optional<String>> request,
             final ExecutionContext context) {
+
+        // Parse the incoming request body (order details)
+        String requestBody = request.getBody().orElse("");
+        if (requestBody.isEmpty()) {
+            return request.createResponseBuilder(HttpStatus.BAD_REQUEST).body("Request body is empty").build();
+        }
+
         context.getLogger().info("Java HTTP trigger processed a request.");
 
-        // Parse query parameter
-        final String query = request.getQueryParameters().get("name");
-        final String name = request.getBody().orElse(query);
+        try {
+            // Deserialize the order details JSON into an Order object
+            ObjectMapper objectMapper = new ObjectMapper();
+            Order order = objectMapper.readValue(requestBody, Order.class);
 
-        if (name == null) {
-            return request.createResponseBuilder(HttpStatus.BAD_REQUEST).body("Please pass a name on the query string or in the request body").build();
-        } else {
-            return request.createResponseBuilder(HttpStatus.OK).body("Hello, " + name).build();
+            // Upload the order to Blob Storage
+            uploadOrderToBlob(order.getSessionId(), requestBody);
+
+            // Return a success response
+            return request.createResponseBuilder(HttpStatus.OK).body("Order processed successfully").build();
+
+        } catch (IOException e) {
+            return request.createResponseBuilder(HttpStatus.INTERNAL_SERVER_ERROR).body("Error processing the order").build();
+        }
+
+    }
+
+    private void uploadOrderToBlob(String sessionId, String orderDetailsJson) {
+        // Create a BlobServiceClient
+        BlobServiceClient blobServiceClient = new BlobServiceClientBuilder()
+                .connectionString(STORAGE_CONNECTION_STRING)
+                .buildClient();
+
+        // Get the BlobContainerClient
+        BlobContainerClient containerClient = blobServiceClient.getBlobContainerClient(CONTAINER_NAME);
+
+        // Create a BlobClient for the session ID file
+        BlobClient blobClient = containerClient.getBlobClient(sessionId + ".json");
+
+        // Convert the order JSON to a byte array (since the upload method requires InputStream or byte[])
+        byte[] jsonBytes = orderDetailsJson.getBytes();
+
+        // Upload the order JSON, overwrite the existing file if it exists
+        try (ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(jsonBytes)) {
+            blobClient.upload(byteArrayInputStream, jsonBytes.length, true);
+            System.out.println("Order uploaded to blob storage with session ID: " + sessionId);
+        } catch (IOException e) {
+            System.err.println("Error uploading order: " + e.getMessage());
         }
     }
 }
