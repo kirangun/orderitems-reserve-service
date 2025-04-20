@@ -1,6 +1,6 @@
 package com.azprc.itemreserver;
 
-import com.azprc.itemreserver.pojo.Order;
+import com.azprc.itemreserver.model.Order;
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobServiceClient;
@@ -50,7 +50,7 @@ public class Function {
 
             logger.info("order details "+ order.toString());
 
-            uploadOrderDetailsToBlob(order.getSessionId(), requestBody);
+            uploadOrderDetailsToBlob(order.getId(), requestBody);
 
             return request.createResponseBuilder(HttpStatus.OK).body("Order processed successfully").build();
 
@@ -60,7 +60,7 @@ public class Function {
 
     }
 
-    private void uploadOrderDetailsToBlob(String sessionId, String orderDetailsJson) {
+    private void uploadOrderDetailsToBlob(String sessionId, String requestBody) {
 
         BlobServiceClient blobServiceClient = new BlobServiceClientBuilder()
                 .connectionString(STORAGE_CONNECTION_STRING)
@@ -70,7 +70,7 @@ public class Function {
 
         BlobClient blobClient = containerClient.getBlobClient(sessionId + ".json");
 
-        byte[] jsonBytes = orderDetailsJson.getBytes();
+        byte[] jsonBytes = requestBody.getBytes();
 
         try (ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(jsonBytes)) {
             blobClient.upload(byteArrayInputStream, jsonBytes.length, true);
