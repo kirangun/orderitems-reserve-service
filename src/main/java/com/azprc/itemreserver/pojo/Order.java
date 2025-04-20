@@ -11,4 +11,12 @@ public class Order {
     public OrderDetails getOrderDetails() {
         return orderDetails;
     }
+
+    @Override
+    public String toString() {
+        return "Order{" +
+                "sessionId='" + sessionId + '\'' +
+                ", orderDetails=" + orderDetails +
+                '}';
+    }
 }

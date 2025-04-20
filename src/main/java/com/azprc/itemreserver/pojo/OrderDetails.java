@@ -18,4 +18,5 @@ public class OrderDetails {
     public double getTotalAmount() {
         return totalAmount;
     }
+
 }
