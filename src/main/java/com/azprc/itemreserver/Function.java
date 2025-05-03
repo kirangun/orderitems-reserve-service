@@ -7,13 +7,19 @@ import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.azure.functions.ExecutionContext;
+import com.microsoft.azure.functions.HttpMethod;
+import com.microsoft.azure.functions.HttpRequestMessage;
+import com.microsoft.azure.functions.HttpResponseMessage;
+import com.microsoft.azure.functions.HttpStatus;
+import com.microsoft.azure.functions.annotation.AuthorizationLevel;
 import com.microsoft.azure.functions.annotation.FunctionName;
-import com.microsoft.azure.functions.annotation.ServiceBusQueueTrigger;
+import com.microsoft.azure.functions.annotation.HttpTrigger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.Optional;
 
 public class Function {
 
@@ -22,26 +28,34 @@ public class Function {
     private static final Logger logger = LoggerFactory.getLogger(Function.class);
 
     @FunctionName("processOrder")
-    public void process(
-            @ServiceBusQueueTrigger(
-                    name = "msg",
-                    queueName = "order-queue",
-                    connection = "MyStorageConnection")
-            String message,
+    public HttpResponseMessage run(
+            @HttpTrigger(
+                    name = "req",
+                    methods = {HttpMethod.GET, HttpMethod.POST},
+                    authLevel = AuthorizationLevel.ANONYMOUS)
+            HttpRequestMessage<Optional<String>> request,
             final ExecutionContext context) {
 
-        context.getLogger().info("Message received from queue");
+        // Parse the incoming request body (order details)
+        String requestBody = request.getBody().orElse("");
+        if (requestBody.isEmpty()) {
+            return request.createResponseBuilder(HttpStatus.BAD_REQUEST).body("Request body is empty").build();
+        }
+
+        context.getLogger().info("Java HTTP trigger processed a request.");
 
         try {
             ObjectMapper objectMapper = new ObjectMapper();
-            Order order = objectMapper.readValue(message, Order.class);
+            Order order = objectMapper.readValue(requestBody, Order.class);
 
-            logger.info("order details {}", order.toString());
+            logger.info("order details "+ order.toString());
 
-            uploadOrderDetailsToBlob(order.getId(), message);
+            uploadOrderDetailsToBlob(order.getId(), requestBody);
+
+            return request.createResponseBuilder(HttpStatus.OK).body("Order processed successfully").build();
 
         } catch (IOException e) {
-            logger.error("Exception while saving order in blob");
+            return request.createResponseBuilder(HttpStatus.INTERNAL_SERVER_ERROR).body("Error processing the order").build();
         }
 
     }
