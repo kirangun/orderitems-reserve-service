@@ -38,9 +38,10 @@ public class Function {
 
             logger.info("order details {}", order.toString());
 
-            uploadOrderDetailsToBlob(order.getId(), message);
+            throw new RuntimeException("Trigger DLQ for error handling");
+            //uploadOrderDetailsToBlob(order.getId(), message);
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             logger.error("Exception while saving order in blob");
         }
 
