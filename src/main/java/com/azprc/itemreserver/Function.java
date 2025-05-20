@@ -1,6 +1,9 @@
 package com.azprc.itemreserver;
 
 import com.azprc.itemreserver.model.Order;
+import com.azure.messaging.servicebus.ServiceBusClientBuilder;
+import com.azure.messaging.servicebus.ServiceBusMessage;
+import com.azure.messaging.servicebus.ServiceBusSenderClient;
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobServiceClient;
@@ -20,6 +23,9 @@ public class Function {
     private static final String STORAGE_CONNECTION_STRING = System.getenv("AZURE_STORAGE_CONNECTION_STRING");
     private static final String CONTAINER_NAME = System.getenv("AZURE_STORAGE_CONTAINER_NAME");
     private static final Logger logger = LoggerFactory.getLogger(Function.class);
+    private static final int MAX_RETRIES = 3;
+    private static final String STORAGE_BUS_CONNECTION_STRING = System.getenv("AZURE_SB_CONNECTION_STRING");
+    private static final String FALLBACK_QUEUE = System.getenv("AZURE_SB_QUEUE_NAME");
 
     @FunctionName("processOrder")
     public void process(
@@ -33,18 +39,34 @@ public class Function {
         context.getLogger().info("Message received from queue");
 
         try {
+
             ObjectMapper objectMapper = new ObjectMapper();
             Order order = objectMapper.readValue(message, Order.class);
 
             logger.info("order details {}", order.toString());
 
-            throw new RuntimeException("Trigger DLQ for error handling");
-            //uploadOrderDetailsToBlob(order.getId(), message);
+            boolean uploaded = false;
+            int attempts = 0;
+
+            while (attempts < MAX_RETRIES) {
+                try {
+                    uploadOrderDetailsToBlob(order.getId(), message);
+                    uploaded = true;
+                    break;
+                } catch (Exception e) {
+                    attempts++;
+                    context.getLogger().warning("Upload failed (attempt " + attempts + "): " + e.getMessage());
+                }
+            }
+
+            if (!uploaded) {
+                context.getLogger().severe("Max retry attempts reached. Sending to fallback queue.");
+                sendToFallbackQueue(message, context);
+            }
 
         } catch (IOException e) {
             logger.error("Exception while saving order in blob");
         }
-
     }
 
     private void uploadOrderDetailsToBlob(String sessionId, String requestBody) {
@@ -65,5 +87,13 @@ public class Function {
         } catch (IOException e) {
             logger.info("Error uploading order: {}", e.getMessage());
         }
+    }
+
+    private void sendToFallbackQueue(String message, ExecutionContext context) {
+
+        ServiceBusSenderClient client = new ServiceBusClientBuilder().connectionString(STORAGE_BUS_CONNECTION_STRING).sender().queueName(FALLBACK_QUEUE).buildClient();
+        client.sendMessage(new ServiceBusMessage(message));
+        client.close();
+        context.getLogger().info("Sent to fallback queue: " + FALLBACK_QUEUE);
     }
 }
